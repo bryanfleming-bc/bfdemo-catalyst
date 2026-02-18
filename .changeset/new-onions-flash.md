@@ -2,25 +2,53 @@
 "@bigcommerce/catalyst-core": patch
 ---
 
-Add canonical URLs and hreflang alternates for SEO. Pages now set `alternates.canonical` and `alternates.languages` in `generateMetadata` via the new `getMetadataAlternates` helper in `core/lib/seo/canonical.ts`. The helper fetches the vanity URL via GraphQL (`site.settings.url.vanityUrl`) and is cached per request. The default locale uses no path prefix; other locales use `/{locale}/path`. The root locale layout sets `metadataBase` to the configured vanity URL so canonical URLs resolve correctly.
+Add canonical URLs and hreflang alternates for SEO. Pages now set `alternates.canonical` and `alternates.languages` in `generateMetadata` via the new `getMetadataAlternates` helper in `core/lib/seo/canonical.ts`. The helper fetches the vanity URL via GraphQL (`site.settings.url.vanityUrl`) and is cached per request. The default locale uses no path prefix; other locales use `/{locale}/path`. The root locale layout sets `metadataBase` to the configured vanity URL so canonical URLs resolve correctly. On Vercel preview deployments (`VERCEL_ENV=preview`), `metadataBase` and canonical/hreflang URLs use `VERCEL_URL` instead of the production vanity URL to prevent preview environments from generating SEO metadata pointing to production.
 
 ## Migration steps
 
 ### Step 1: Root layout metadata base
 
-The root locale layout now sets `metadataBase` from the vanity URL fetched via GraphQL. This is already included in the `RootLayoutMetadataQuery`.
+The root locale layout now sets `metadataBase` from the vanity URL fetched via GraphQL. On Vercel preview deployments, `VERCEL_URL` is used instead so preview environments don't point to production. `URL.canParse` guards against malformed URLs.
 
 Update `core/app/[locale]/layout.tsx`:
 
 ```diff
 + const vanityUrl = data.site.settings?.url.vanityUrl;
 +
++ // Use preview deployment URL so metadataBase (canonical, og:url) points at the preview, not production.
++ let baseUrl: URL | undefined;
++ const previewUrl =
++   process.env.VERCEL_ENV === 'preview' ? `https://${process.env.VERCEL_URL}` : undefined;
++
++ if (previewUrl && URL.canParse(previewUrl)) {
++   baseUrl = new URL(previewUrl);
++ } else if (vanityUrl && URL.canParse(vanityUrl)) {
++   baseUrl = new URL(vanityUrl);
++ }
++
   return {
-+   metadataBase: vanityUrl ? new URL(vanityUrl) : undefined,
++   metadataBase: baseUrl,
     title: {
 ```
 
-### Step 2: GraphQL fragment updates
+### Step 2: Canonical/hreflang base URL for preview environments
+
+The `getMetadataAlternates` function in `core/lib/seo/canonical.ts` now checks for a Vercel preview URL before falling back to the GraphQL vanity URL. `URL.canParse` guards against malformed URLs.
+
+Update `core/lib/seo/canonical.ts`:
+
+```diff
+ export async function getMetadataAlternates(options: CanonicalUrlOptions) {
+   const { path, locale, includeAlternates = true } = options;
+
+-  const baseUrl = await getVanityUrl();
++  // Use preview deployment URL so canonical/hreflang URLs point at the preview, not production.
++  const previewUrl =
++    process.env.VERCEL_ENV === 'preview' ? `https://${process.env.VERCEL_URL}` : undefined;
++  const baseUrl = previewUrl && URL.canParse(previewUrl) ? previewUrl : await getVanityUrl();
+```
+
+### Step 3: GraphQL fragment updates
 
 Add the `path` field to brand, blog post, and product queries so metadata can build canonical URLs.
 
@@ -54,7 +82,7 @@ Update `core/app/[locale]/(default)/product/[slug]/page-data.ts` (in the metadat
       defaultImage {
 ```
 
-### Step 3: Page metadata alternates
+### Step 4: Page metadata alternates
 
 Add the `getMetadataAlternates` import and set `alternates` in `generateMetadata` for each page. The function is async and must be awaited. Ensure `core/lib/seo/canonical.ts` exists (it is included in this release).
 
@@ -94,7 +122,7 @@ For entity pages (product, category, brand, blog, blog post, webpage), add the i
   }
 ```
 
-### Step 4: Gift certificates pages
+### Step 5: Gift certificates pages
 
 Update `core/app/[locale]/(default)/gift-certificates/page.tsx`:
 
@@ -142,7 +170,7 @@ Add `generateMetadata` to `core/app/[locale]/(default)/gift-certificates/purchas
 + }
 ```
 
-### Step 5: Contact page
+### Step 6: Contact page
 
 Update `core/app/[locale]/(default)/webpages/[id]/contact/page.tsx`:
 
@@ -164,7 +192,7 @@ Update `core/app/[locale]/(default)/webpages/[id]/contact/page.tsx`:
   }
 ```
 
-### Step 6: Public wishlist page
+### Step 7: Public wishlist page
 
 Update `core/app/[locale]/(default)/wishlist/[token]/page.tsx`:
 
@@ -181,7 +209,7 @@ Update `core/app/[locale]/(default)/wishlist/[token]/page.tsx`:
   }
 ```
 
-### Step 7: Compare page
+### Step 8: Compare page
 
 Update `core/app/[locale]/(default)/compare/page.tsx`:
 

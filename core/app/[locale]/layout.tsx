@@ -73,8 +73,19 @@ export async function generateMetadata(): Promise<Metadata> {
 
   const vanityUrl = data.site.settings?.url.vanityUrl;
 
+  // Use preview deployment URL so metadataBase (canonical, og:url) points at the preview, not production.
+  let baseUrl: URL | undefined;
+  const previewUrl =
+    process.env.VERCEL_ENV === 'preview' ? `https://${process.env.VERCEL_URL}` : undefined;
+
+  if (previewUrl && URL.canParse(previewUrl)) {
+    baseUrl = new URL(previewUrl);
+  } else if (vanityUrl && URL.canParse(vanityUrl)) {
+    baseUrl = new URL(vanityUrl);
+  }
+
   return {
-    metadataBase: vanityUrl ? new URL(vanityUrl) : undefined,
+    metadataBase: baseUrl,
     title: {
       template: `%s - ${storeName}`,
       default: pageTitle || storeName,
